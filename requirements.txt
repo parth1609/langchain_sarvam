@@ -1,5 +1,6 @@
-langchain_core
-langsmith
-dotenv
+# sarvamai==0.1.21
+langchain-core
+python-dotenv
 sarvamai
-ipykernel
+# python-dotenv==1.1.1
+# langchain-core==0.3.76
