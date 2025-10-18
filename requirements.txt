@@ -1,0 +1,5 @@
+langchain_core
+langsmith
+dotenv
+sarvamai
+ipykernel
