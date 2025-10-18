@@ -2,27 +2,24 @@
 
 Integration package connecting Sarvam AI chat completions with LangChain.
 
-## Installation (dev, from monorepo)
+## Installation
 
-```powershell
-# From repo root
-python -m pip install -e libs/partners/sarvam
-```
 
-Or with `uv` inside the package:
+with `uv` inside the package:
 
-```powershell
-# From libs/partners/sarvam/
-uv sync
+```bash
+uv pip install langchain-sarvam
 ```
 
 ## Setup
 
-```powershell
-$Env:SARVAM_API_KEY = "your_api_key"
+```python
+# Set the SARVAM API key
+sarvam_Api_key = os.getenv("SARVAM_API_KEY")
 ```
 
 ## Usage
+### Basic Usage
 
 ```python
 from langchain_sarvam import ChatSarvam
@@ -32,30 +29,81 @@ resp = llm.invoke([("system", "You are helpful"), ("human", "Hello!")])
 print(resp.content)
 ```
 
-Streaming:
+### Language-Specific Usage
+
+```python
+from langchain_sarvam import ChatSarvam
+
+llm = ChatSarvam(
+    model="sarvam-m",
+    temperature=0.7,
+    sarvam_api_key=os.getenv("SARVAM_API_KEY")
+)
+
+response = llm.invoke([
+    ("system", "talk in Hindi"),
+    ("human", "what is color of sky?"),
+])
+print(response.content)  # Output: आसमान का रंग नीला होता है...
+```
+
+### Advanced Content Generation
+
+```python
+from langchain_sarvam import ChatSarvam
+
+llm = ChatSarvam(model="sarvam-m")
+
+# Generate blog post outline
+response = llm.invoke("create the outline for the blog post outline for blog topic - AI engineering.")
+print(response.content)
+```
+
+### Batch Processing
+
+```python
+from langchain_sarvam import ChatSarvam
+from langchain_core.messages import HumanMessage
+
+chat = ChatSarvam(model="sarvam-m")
+
+# Batch processing - use list of message lists
+messages = [
+    [HumanMessage(content="Tell me a joke")],
+    [HumanMessage(content="What's the weather like?")]
+]
+
+responses = chat.batch(messages)
+for response in responses:
+    print(response.content)
+```
+
+### Using generate() Method
+
+```python
+from langchain_sarvam import ChatSarvam
+from langchain_core.messages import HumanMessage
+
+chat = ChatSarvam(model="sarvam-m")
+
+# generate() expects a list of message lists
+inputs = [
+    [HumanMessage(content="Tell me a joke with emojis only")],
+    [HumanMessage(content="What's the weather like?")]
+]
+
+result = chat.generate(inputs)
+for generation_list in result.generations:
+    # generation_list is a list of ChatGeneration objects
+    for generation in generation_list:
+        print(generation.message.content)
+```
+
+
+### Streaming
 
 ```python
 for chunk in ChatSarvam(model="sarvam-m", streaming=True).stream("Tell me a joke"):
     print(chunk.text, end="")
 ```
-
-## Testing
-
-- On Windows, running tests with `pytest-socket` and `--disable-socket` can block asyncio event loop creation. The async test `test_sarvam_ainvoke` is marked with `@pytest.mark.enable_socket` to allow loop setup only for that test; all other tests remain socket-restricted.
-- Run the suite with sockets disabled (safe for the rest of the tests):
-
-```powershell
-uv run --group test pytest --disable-socket --allow-unix-socket tests/unit_tests -q
-```
-
-Or without `uv`:
-
-```powershell
-pytest --disable-socket --allow-unix-socket tests/unit_tests -q
-```
-
-## Development
-
-- Tests: `pytest tests/unit_tests -q`
-- Type check: `mypy .`
-- Lint: `ruff check .`
+ 
