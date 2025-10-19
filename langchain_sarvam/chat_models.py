@@ -34,46 +34,172 @@ from typing_extensions import Self
 
 
 class ChatSarvam(BaseChatModel):
-    """ChatSarvam integrates Sarvam AI chat models with LangChain.
+    """Sarvam AI chat model integration for LangChain.
 
-    This class provides a complete implementation of the BaseChatModel interface
-    for Sarvam AI's multilingual chat models, supporting both synchronous and
-    asynchronous operations, streaming, and comprehensive parameter control.
+    Sarvam AI provides multilingual AI models with native support for 10+ 
+    Indic languages including Hindi, Bengali, Telugu, Tamil, and more.
+
+    Setup:
+        Install ``langchain-sarvam`` and set your API key:
+
+        .. code-block:: bash
+
+            pip install langchain-sarvam
+            export SARVAM_API_KEY="your-api-key"
+
+    Key init args — completion params:
+        model_name: Model name to use. Defaults to "sarvam-m".
+        temperature: Sampling temperature between 0.0 and 2.0. Higher values
+            make output more random. Defaults to 0.7.
+        max_tokens: Maximum number of tokens to generate. If None, will use
+            model's default maximum.
+        top_p: Nucleus sampling parameter. Defaults to 1.0.
+        n: Number of completions to generate. Must be 1 when streaming.
+        stop: Stop sequences. Can be a string or list of strings.
+        frequency_penalty: Penalize frequent tokens. Defaults to None.
+        presence_penalty: Penalize new tokens. Defaults to None.
+        reasoning_effort: Reasoning effort level. One of "low", "medium", "high".
+        seed: Random seed for reproducibility.
+        wiki_grounding: Enable wiki grounding. Defaults to None.
+
+    Key init args — client params:
+        sarvam_api_key: Sarvam AI API key. If not passed in will be read from env var SARVAM_API_KEY.
+        request_timeout: Request timeout in seconds.
+        streaming: Whether to stream responses. Defaults to False.
+        http_client: Custom HTTP client for sync requests.
+        http_async_client: Custom HTTP client for async requests.
+
+    See full list of supported init args and their descriptions in the params section.
+
+    Instantiate:
+        .. code-block:: python
+
+            from langchain_sarvam import ChatSarvam
+
+            llm = ChatSarvam(
+                model_name="sarvam-m",
+                temperature=0.7,
+                max_tokens=256,
+            )
+
+    Invoke:
+        .. code-block:: python
+
+            messages = [
+                ("system", "You are a helpful assistant that speaks Hindi."),
+                ("human", "What is the color of the sky?"),
+            ]
+            llm.invoke(messages)
+
+        .. code-block:: python
+
+            AIMessage(content='आसमान का रंग नीला होता है।', response_metadata={...})
+
+    Stream:
+        .. code-block:: python
+
+            for chunk in llm.stream(messages):
+                print(chunk.content, end="", flush=True)
+
+    Async:
+        .. code-block:: python
+
+            await llm.ainvoke(messages)
+
+        .. code-block:: python
+
+            async for chunk in llm.astream(messages):
+                print(chunk.content, end="", flush=True)
+
+    Batch:
+        .. code-block:: python
+
+            llm.batch([messages1, messages2])
+
+    Multilingual support:
+        Sarvam AI natively supports 10+ Indic languages:
+
+        .. code-block:: python
+
+            # Hindi
+            messages = [
+                ("system", "talk in Hindi"),
+                ("human", "Hello, how are you?"),
+            ]
+            response = llm.invoke(messages)
+            print(response.content)  # Output in Hindi
+
+    Response metadata:
+        .. code-block:: python
+
+            ai_msg = llm.invoke(messages)
+            ai_msg.response_metadata
+
+        .. code-block:: python
+
+            {
+                'token_usage': {'completion_tokens': 12, 'prompt_tokens': 57, 'total_tokens': 69},
+                'model_name': 'sarvam-m',
+                'finish_reason': 'stop',
+            }
     """
 
-    client: Any = Field(default=None, exclude=True)
-    async_client: Any = Field(default=None, exclude=True)
+    # Client instances (internal use only)
+    client: Any = Field(default=None, exclude=True, description="Internal Sarvam AI synchronous client instance.")
+    async_client: Any = Field(default=None, exclude=True, description="Internal Sarvam AI asynchronous client instance.")
 
-    model_name: str = Field(alias="model")
-    temperature: float | None = None
-    top_p: float | None = None
-    max_tokens: int | None = None
-    n: int = 1
-    stop: list[str] | str | None = Field(default=None, alias="stop_sequences")
+    # Model parameters
+    model_name: str = Field(alias="model", description="Model name to use for chat completions. Defaults to 'sarvam-m'.")
+    temperature: float | None = Field(default=None, description="Sampling temperature between 0.0 and 2.0. Higher values make output more random.")
+    top_p: float | None = Field(default=None, description="Nucleus sampling parameter. Controls diversity via cumulative probability.")
+    max_tokens: int | None = Field(default=None, description="Maximum number of tokens to generate. If None, uses model's default maximum.")
+    n: int = Field(default=1, description="Number of completions to generate. Must be 1 when streaming is enabled.")
+    stop: list[str] | str | None = Field(default=None, alias="stop_sequences", description="Stop sequences. Can be a string or list of strings.")
 
-    frequency_penalty: float | None = None
-    presence_penalty: float | None = None
-    reasoning_effort: Literal["low", "medium", "high"] | None = None
-    seed: int | None = None
-    wiki_grounding: bool | None = None
+    # Advanced parameters
+    frequency_penalty: float | None = Field(default=None, description="Penalizes frequent tokens to reduce repetition. Values between -2.0 and 2.0.")
+    presence_penalty: float | None = Field(default=None, description="Penalizes new tokens to encourage topic diversity. Values between -2.0 and 2.0.")
+    reasoning_effort: Literal["low", "medium", "high"] | None = Field(default=None, description="Reasoning effort level for the model.")
+    seed: int | None = Field(default=None, description="Random seed for reproducible outputs.")
+    wiki_grounding: bool | None = Field(default=None, description="Enable wiki grounding for factual responses.")
 
-    model_kwargs: dict[str, Any] = Field(default_factory=dict)
+    # Additional model kwargs
+    model_kwargs: dict[str, Any] = Field(default_factory=dict, description="Additional keyword arguments passed to the Sarvam AI API.")
 
+    # Authentication and client configuration
     sarvam_api_key: SecretStr | None = Field(
-        alias="api_key", default_factory=secret_from_env("SARVAM_API_KEY", default=None)
+        alias="api_key",
+        default_factory=lambda: secret_from_env("SARVAM_API_KEY", default=None),
+        description="Sarvam AI API key. If not provided, reads from SARVAM_API_KEY environment variable."
     )
-    request_timeout: float | None = Field(default=None, alias="timeout")
+    request_timeout: float | None = Field(default=None, alias="timeout", description="Request timeout in seconds.")
 
-    http_client: Any | None = None
-    http_async_client: Any | None = None
+    # HTTP client customization
+    http_client: Any | None = Field(default=None, description="Custom HTTP client for synchronous requests.")
+    http_async_client: Any | None = Field(default=None, description="Custom HTTP client for asynchronous requests.")
 
-    streaming: bool = False
+    # Streaming configuration
+    streaming: bool = Field(default=False, description="Whether to stream responses. When True, enables real-time token streaming.")
 
     model_config = ConfigDict(populate_by_name=True)
 
     @model_validator(mode="before")
     @classmethod
     def build_extra(cls, values: dict[str, Any]) -> Any:
+        """Build extra model kwargs from unknown fields.
+
+        This method processes fields that are not explicitly defined in the model
+        and moves them to the model_kwargs dictionary for passing to the API.
+
+        Args:
+            values: Raw input values before validation.
+
+        Returns:
+            Processed values with extra fields moved to model_kwargs.
+
+        Raises:
+            ValueError: If a field is specified both explicitly and in model_kwargs.
+        """
         all_required_field_names = get_pydantic_field_names(cls)
         extra = values.get("model_kwargs", {})
         for field_name in list(values):
@@ -94,6 +220,19 @@ class ChatSarvam(BaseChatModel):
 
     @model_validator(mode="after")
     def validate_environment(self) -> Self:
+        """Validate the environment and initialize clients.
+
+        This method performs validation of model parameters and initializes
+        the Sarvam AI client instances for both sync and async operations.
+
+        Returns:
+            Self: The validated model instance.
+
+        Raises:
+            ValueError: If n < 1 or if streaming is enabled with n > 1.
+            ImportError: If the sarvamai package is not installed.
+            ValueError: If the API key is not provided.
+        """
         if self.n < 1:
             raise ValueError("n must be at least 1.")
         if self.n > 1 and self.streaming:
@@ -132,22 +271,43 @@ class ChatSarvam(BaseChatModel):
 
     @property
     def lc_secrets(self) -> dict[str, str]:
-        """Return the secret environment variable names."""
+        """Return the secret environment variable names for this model.
+
+        Returns:
+            Dictionary mapping field names to environment variable names.
+        """
         return {"sarvam_api_key": "SARVAM_API_KEY"}
 
     @classmethod
     def is_lc_serializable(cls) -> bool:
-        """Return whether this model can be serialized by LangChain."""
+        """Return whether this model can be serialized by LangChain.
+
+        Returns:
+            True, as ChatSarvam supports serialization.
+        """
         return True
 
     @property
     def _llm_type(self) -> str:
-        """Return the type identifier for this LLM."""
+        """Return the type identifier for this LLM.
+
+        Returns:
+            String identifier for LangChain's internal use.
+        """
         return "sarvam-chat"
 
     def _get_ls_params(
         self, stop: list[str] | None = None, **kwargs: Any
     ) -> LangSmithParams:
+        """Get parameters for LangSmith tracing.
+
+        Args:
+            stop: Stop sequences to override the instance default.
+            **kwargs: Additional keyword arguments (unused).
+
+        Returns:
+            LangSmithParams object with tracing information.
+        """
         # kwargs is unused but required by base class interface
         ls_params = LangSmithParams(
             ls_provider="sarvam",
@@ -173,7 +333,12 @@ class ChatSarvam(BaseChatModel):
                 ls_params["ls_stop"] = ls_stop
         return ls_params
 
-    def _default_params(self) -> dict[str, Any]:  # type: ignore[override]
+    def _default_params(self) -> dict[str, Any]:
+        """Get the default parameters for API calls.
+
+        Returns:
+            Dictionary of parameters to send to the Sarvam AI API.
+        """
         # Sarvam SDK does not accept a 'model' parameter currently; default model is sarvam-m.
         params: dict[str, Any] = {
             "n": self.n,
@@ -203,6 +368,15 @@ class ChatSarvam(BaseChatModel):
     def _create_message_dicts(
         self, messages: list[BaseMessage], stop: list[str] | None
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """Create message dictionaries and parameters for API calls.
+
+        Args:
+            messages: List of BaseMessage objects to convert.
+            stop: Stop sequences to override instance defaults.
+
+        Returns:
+            Tuple of (message_dicts, params) for the API call.
+        """
         params = self._default_params()
         if stop is not None:
             params["stop"] = stop
@@ -216,6 +390,17 @@ class ChatSarvam(BaseChatModel):
         run_manager: CallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> ChatResult:
+        """Generate a chat completion synchronously.
+
+        Args:
+            messages: List of messages for the conversation.
+            stop: Optional stop sequences.
+            run_manager: Callback manager for run tracking.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            ChatResult containing the generated response.
+        """
         if self.streaming:
             stream_iter = self._stream(
                 messages, stop=stop, run_manager=run_manager, **kwargs
@@ -233,6 +418,17 @@ class ChatSarvam(BaseChatModel):
         run_manager: AsyncCallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> ChatResult:
+        """Generate a chat completion asynchronously.
+
+        Args:
+            messages: List of messages for the conversation.
+            stop: Optional stop sequences.
+            run_manager: Async callback manager for run tracking.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            ChatResult containing the generated response.
+        """
         if self.streaming:
             stream_iter = self._astream(
                 messages, stop=stop, run_manager=run_manager, **kwargs
@@ -250,6 +446,17 @@ class ChatSarvam(BaseChatModel):
         run_manager: CallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> Iterator[ChatGenerationChunk]:
+        """Stream chat completion responses synchronously.
+
+        Args:
+            messages: List of messages for the conversation.
+            stop: Optional stop sequences.
+            run_manager: Callback manager for run tracking.
+            **kwargs: Additional keyword arguments.
+
+        Yields:
+            ChatGenerationChunk objects as they become available.
+        """
         message_dicts, params = self._create_message_dicts(messages, stop)
         params = {**params, **kwargs, "stream": True}
         default_chunk_class: type[BaseMessageChunk] = AIMessageChunk
@@ -287,6 +494,17 @@ class ChatSarvam(BaseChatModel):
         run_manager: AsyncCallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[ChatGenerationChunk]:
+        """Stream chat completion responses asynchronously.
+
+        Args:
+            messages: List of messages for the conversation.
+            stop: Optional stop sequences.
+            run_manager: Async callback manager for run tracking.
+            **kwargs: Additional keyword arguments.
+
+        Yields:
+            ChatGenerationChunk objects as they become available.
+        """
         message_dicts, params = self._create_message_dicts(messages, stop)
         params = {**params, **kwargs, "stream": True}
         default_chunk_class: type[BaseMessageChunk] = AIMessageChunk
@@ -322,6 +540,15 @@ class ChatSarvam(BaseChatModel):
     def _create_chat_result(
         self, response: dict | BaseModel, params: Mapping[str, Any]
     ) -> ChatResult:
+        """Create a ChatResult from the API response.
+
+        Args:
+            response: Raw response from the Sarvam AI API.
+            params: Parameters used for the request (unused but required by interface).
+
+        Returns:
+            ChatResult containing the processed response.
+        """
         # params is unused but required by base class interface
         generations: list[ChatGeneration] = []
         if not isinstance(response, dict):
