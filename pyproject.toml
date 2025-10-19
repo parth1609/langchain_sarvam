@@ -3,7 +3,7 @@ requires = ["hatchling >= 1.26"]
 build-backend = "hatchling.build"
 
 [project]
-name = "langchain-sarvam"
+name = "langchain_sarvam"
 version = "0.1.1"
 description = "An integration package connecting sarvam-AI and LangChain"
 authors = [
