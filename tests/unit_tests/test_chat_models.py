@@ -59,6 +59,7 @@ def test_sarvam_invoke() -> None:
     assert completed
 
 
+@pytest.mark.asyncio
 @pytest.mark.enable_socket
 async def test_sarvam_ainvoke() -> None:
     llm = ChatSarvam(model="foo")
@@ -99,6 +100,7 @@ def test_sarvam_serialization() -> None:
     dump = lc_load.dumps(llm)
     llm2 = lc_load.loads(
         dump,
+        allowed_objects=[ChatSarvam],
         valid_namespaces=["langchain_sarvam"],
         secrets_map={"SARVAM_API_KEY": api_key2},
     )

@@ -145,41 +145,92 @@ class ChatSarvam(BaseChatModel):
     """
 
     # Client instances (internal use only)
-    client: Any = Field(default=None, exclude=True, description="Internal Sarvam AI synchronous client instance.")
-    async_client: Any = Field(default=None, exclude=True, description="Internal Sarvam AI asynchronous client instance.")
+    client: Any = Field(
+        default=None,
+        exclude=True,
+        description="Internal Sarvam AI synchronous client instance.",
+    )
+    async_client: Any = Field(
+        default=None,
+        exclude=True,
+        description="Internal Sarvam AI asynchronous client instance.",
+    )
 
     # Model parameters
-    model_name: str = Field(alias="model", description="Model name to use for chat completions. Defaults to 'sarvam-m'.")
-    temperature: float | None = Field(default=None, description="Sampling temperature between 0.0 and 2.0. Higher values make output more random.")
-    top_p: float | None = Field(default=None, description="Nucleus sampling parameter. Controls diversity via cumulative probability.")
-    max_tokens: int | None = Field(default=None, description="Maximum number of tokens to generate. If None, uses model's default maximum.")
-    n: int = Field(default=1, description="Number of completions to generate. Must be 1 when streaming is enabled.")
-    stop: list[str] | str | None = Field(default=None, alias="stop_sequences", description="Stop sequences. Can be a string or list of strings.")
+    model_name: str = Field(
+        alias="model",
+        description="Model name to use for chat completions. Defaults to 'sarvam-m'.",
+    )
+    temperature: float | None = Field(
+        default=None,
+        description="Sampling temperature between 0.0 and 2.0. Higher values make output more random.",
+    )
+    top_p: float | None = Field(
+        default=None,
+        description="Nucleus sampling parameter. Controls diversity via cumulative probability.",
+    )
+    max_tokens: int | None = Field(
+        default=None,
+        description="Maximum number of tokens to generate. If None, uses model's default maximum.",
+    )
+    n: int = Field(
+        default=1,
+        description="Number of completions to generate. Must be 1 when streaming is enabled.",
+    )
+    stop: list[str] | str | None = Field(
+        default=None,
+        alias="stop_sequences",
+        description="Stop sequences. Can be a string or list of strings.",
+    )
 
     # Advanced parameters
-    frequency_penalty: float | None = Field(default=None, description="Penalizes frequent tokens to reduce repetition. Values between -2.0 and 2.0.")
-    presence_penalty: float | None = Field(default=None, description="Penalizes new tokens to encourage topic diversity. Values between -2.0 and 2.0.")
-    reasoning_effort: Literal["low", "medium", "high"] | None = Field(default=None, description="Reasoning effort level for the model.")
-    seed: int | None = Field(default=None, description="Random seed for reproducible outputs.")
-    wiki_grounding: bool | None = Field(default=None, description="Enable wiki grounding for factual responses.")
+    frequency_penalty: float | None = Field(
+        default=None,
+        description="Penalizes frequent tokens to reduce repetition. Values between -2.0 and 2.0.",
+    )
+    presence_penalty: float | None = Field(
+        default=None,
+        description="Penalizes new tokens to encourage topic diversity. Values between -2.0 and 2.0.",
+    )
+    reasoning_effort: Literal["low", "medium", "high"] | None = Field(
+        default=None, description="Reasoning effort level for the model."
+    )
+    seed: int | None = Field(
+        default=None, description="Random seed for reproducible outputs."
+    )
+    wiki_grounding: bool | None = Field(
+        default=None, description="Enable wiki grounding for factual responses."
+    )
 
     # Additional model kwargs
-    model_kwargs: dict[str, Any] = Field(default_factory=dict, description="Additional keyword arguments passed to the Sarvam AI API.")
+    model_kwargs: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Additional keyword arguments passed to the Sarvam AI API.",
+    )
 
     # Authentication and client configuration
     sarvam_api_key: SecretStr | None = Field(
         alias="api_key",
-        default_factory=lambda: secret_from_env("SARVAM_API_KEY", default=None),
-        description="Sarvam AI API key. If not provided, reads from SARVAM_API_KEY environment variable."
+        default_factory=secret_from_env("SARVAM_API_KEY", default=None),
+        description="Sarvam AI API key. If not provided, reads from SARVAM_API_KEY environment variable.",
     )
-    request_timeout: float | None = Field(default=None, alias="timeout", description="Request timeout in seconds.")
+    request_timeout: float | None = Field(
+        default=None, alias="timeout", description="Request timeout in seconds."
+    )
 
     # HTTP client customization
-    http_client: Any | None = Field(default=None, description="Custom HTTP client for synchronous requests.")
-    http_async_client: Any | None = Field(default=None, description="Custom HTTP client for asynchronous requests.")
+    http_client: Any | None = Field(
+        default=None, description="Custom HTTP client for synchronous requests."
+    )
+    http_async_client: Any | None = Field(
+        default=None, description="Custom HTTP client for asynchronous requests."
+    )
 
     # Streaming configuration
-    streaming: bool = Field(default=False, description="Whether to stream responses. When True, enables real-time token streaming.")
+    streaming: bool = Field(
+        default=False,
+        description="Whether to stream responses. When True, enables real-time token streaming.",
+    )
 
     model_config = ConfigDict(populate_by_name=True)
 

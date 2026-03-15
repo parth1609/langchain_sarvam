@@ -1,6 +1,0 @@
-# sarvamai==0.1.21
-langchain-core
-python-dotenv
-sarvamai
-# python-dotenv==1.1.1
-# langchain-core==0.3.76
