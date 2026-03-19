@@ -1,16 +1,25 @@
-from collections.abc import AsyncIterator, Iterator, Mapping
+"""Sarvam chat models."""
+
+from __future__ import annotations
+
+import json
+import warnings
+from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
+from operator import itemgetter
 from typing import Any, Literal, cast
 
 from langchain_core.callbacks import (
     AsyncCallbackManagerForLLMRun,
     CallbackManagerForLLMRun,
 )
+
 from langchain_core.language_models.chat_models import (
     BaseChatModel,
     LangSmithParams,
     agenerate_from_stream,
     generate_from_stream,
 )
+from langchain_core.utils.utils import _build_model_kwargs
 from langchain_core.messages import (
     AIMessage,
     AIMessageChunk,
@@ -39,40 +48,58 @@ class ChatSarvam(BaseChatModel):
     Sarvam AI provides multilingual AI models with native support for 10+ 
     Indic languages including Hindi, Bengali, Telugu, Tamil, and more.
 
+
     Setup:
-        Install ``langchain-sarvam`` and set your API key:
+        Install `langchain-sarvam` and set environment variable
+        `SARVAM_API_KEY`.
 
-        .. code-block:: bash
+        ```python
 
-            pip install langchain-sarvam
+            pip install -U langchain-sarvam
             export SARVAM_API_KEY="your-api-key"
 
+        ```
+
     Key init args — completion params:
-        model_name: Model name to use. Defaults to "sarvam-m".
-        temperature: Sampling temperature between 0.0 and 2.0. Higher values
-            make output more random. Defaults to 0.7.
-        max_tokens: Maximum number of tokens to generate. If None, will use
-            model's default maximum.
-        top_p: Nucleus sampling parameter. Defaults to 1.0.
-        n: Number of completions to generate. Must be 1 when streaming.
-        stop: Stop sequences. Can be a string or list of strings.
-        frequency_penalty: Penalize frequent tokens. Defaults to None.
-        presence_penalty: Penalize new tokens. Defaults to None.
-        reasoning_effort: Reasoning effort level. One of "low", "medium", "high".
-        seed: Random seed for reproducibility.
-        wiki_grounding: Enable wiki grounding. Defaults to None.
+        model_name: 
+            Model name to use. e.g. "sarvam-m".
+        temperature: 
+            Sampling temperature between 0.0 and 1.0. 
+        top_p: 
+            Nucleus sampling parameter. Defaults to 1.0.
+        reasoning_effort: 
+            Reasoning effort level. One of "low", "medium", "high".
+        max_tokens: 
+           Max number of tokens to generate.
+        stop: 
+            Stop sequences. Can be a string or list of strings.
+        n: 
+            Number of completions to generate. Optional (1-128). Defaults to 1.
+        frequency_penalty: 
+            Penalize frequent tokens. Defaults to None. (-2.0 to 2.0)
+        presence_penalty: 
+            Penalize new tokens. Defaults to None. (-2.0 to 2.0)
+        seed: 
+            Random seed for reproducibility.
+        wiki_grounding: 
+            Enable wiki grounding. Defaults to False.
 
     Key init args — client params:
-        sarvam_api_key: Sarvam AI API key. If not passed in will be read from env var SARVAM_API_KEY.
-        request_timeout: Request timeout in seconds.
-        streaming: Whether to stream responses. Defaults to False.
-        http_client: Custom HTTP client for sync requests.
-        http_async_client: Custom HTTP client for async requests.
+        sarvam_api_key: 
+            Sarvam AI API key. If not passed in will be read from env var SARVAM_API_KEY.
+        request_timeout: 
+            Request timeout in seconds.
+        streaming: 
+            Whether to stream responses. Defaults to False.
+        http_client: 
+            Custom HTTP client for sync requests.
+        http_async_client: 
+            Custom HTTP client for async requests.
 
     See full list of supported init args and their descriptions in the params section.
 
     Instantiate:
-        .. code-block:: python
+        ```python
 
             from langchain_sarvam import ChatSarvam
 
@@ -80,46 +107,57 @@ class ChatSarvam(BaseChatModel):
                 model_name="sarvam-m",
                 temperature=0.7,
                 max_tokens=256,
+                # other params
             )
+        ```
 
     Invoke:
-        .. code-block:: python
+        ```python
 
             messages = [
                 ("system", "You are a helpful assistant that speaks Hindi."),
                 ("human", "What is the color of the sky?"),
             ]
             llm.invoke(messages)
+        ```
 
-        .. code-block:: python
+
+        ```python
 
             AIMessage(content='आसमान का रंग नीला होता है।', response_metadata={...})
+        ```
 
     Stream:
-        .. code-block:: python
+        ```python
 
             for chunk in llm.stream(messages):
                 print(chunk.content, end="", flush=True)
+        ```
 
     Async:
-        .. code-block:: python
+        ```python
 
             await llm.ainvoke(messages)
 
-        .. code-block:: python
+        ```
+        
+        ```python
 
             async for chunk in llm.astream(messages):
                 print(chunk.content, end="", flush=True)
+        ```
 
     Batch:
-        .. code-block:: python
+        ```python
 
             llm.batch([messages1, messages2])
+        ```
+        
 
     Multilingual support:
         Sarvam AI natively supports 10+ Indic languages:
 
-        .. code-block:: python
+        ```python
 
             # Hindi
             messages = [
@@ -128,21 +166,26 @@ class ChatSarvam(BaseChatModel):
             ]
             response = llm.invoke(messages)
             print(response.content)  # Output in Hindi
+            
+        ```
 
     Response metadata:
-        .. code-block:: python
+        ```python
 
             ai_msg = llm.invoke(messages)
             ai_msg.response_metadata
-
-        .. code-block:: python
+        ```
+        
+        ```python
 
             {
                 'token_usage': {'completion_tokens': 12, 'prompt_tokens': 57, 'total_tokens': 69},
                 'model_name': 'sarvam-m',
                 'finish_reason': 'stop',
             }
-    """
+        ```
+"""
+
 
     # Client instances (internal use only)
     client: Any = Field(
@@ -156,14 +199,21 @@ class ChatSarvam(BaseChatModel):
         description="Internal Sarvam AI asynchronous client instance.",
     )
 
+
     # Model parameters
     model_name: str = Field(
         alias="model",
         description="Model name to use for chat completions. Defaults to 'sarvam-m'.",
     )
+
+    @property
+    def model(self) -> str:
+        """same as model_name"""
+        return self.model_name
+
     temperature: float | None = Field(
-        default=None,
-        description="Sampling temperature between 0.0 and 2.0. Higher values make output more random.",
+        default=0.2,
+        description="Sampling temperature between 0.0 and 1.0. Higher values make output more random.",
     )
     top_p: float | None = Field(
         default=None,
@@ -199,7 +249,7 @@ class ChatSarvam(BaseChatModel):
         default=None, description="Random seed for reproducible outputs."
     )
     wiki_grounding: bool | None = Field(
-        default=None, description="Enable wiki grounding for factual responses."
+        default=False, description="Enable wiki grounding for factual responses."
     )
 
     # Additional model kwargs
@@ -237,37 +287,22 @@ class ChatSarvam(BaseChatModel):
     @model_validator(mode="before")
     @classmethod
     def build_extra(cls, values: dict[str, Any]) -> Any:
-        """Build extra model kwargs from unknown fields.
-
-        This method processes fields that are not explicitly defined in the model
-        and moves them to the model_kwargs dictionary for passing to the API.
+        """
+        Build "model_kwargs" param from Pydantic constructor values.
 
         Args:
-            values: Raw input values before validation.
+            values: All init args passed in by user.
+            all_required_field_names: All required field names for the pydantic class.
 
         Returns:
-            Processed values with extra fields moved to model_kwargs.
+            dict[str, Any]: Extra kwargs.
 
         Raises:
-            ValueError: If a field is specified both explicitly and in model_kwargs.
+            ValueError: If a field is specified in both values and extra_kwargs.
+            ValueError: If a field is specified in model_kwargs.
         """
         all_required_field_names = get_pydantic_field_names(cls)
-        extra = values.get("model_kwargs", {})
-        for field_name in list(values):
-            if field_name in extra:
-                msg = f"Found {field_name} supplied twice."
-                raise ValueError(msg)
-            if field_name not in all_required_field_names:
-                extra[field_name] = values.pop(field_name)
-        invalid_model_kwargs = all_required_field_names.intersection(extra.keys())
-        if invalid_model_kwargs:
-            msg = (
-                f"Parameters {invalid_model_kwargs} should be specified explicitly. "
-                "Instead they were passed in as part of `model_kwargs` parameter."
-            )
-            raise ValueError(msg)
-        values["model_kwargs"] = extra
-        return values
+        return _build_model_kwargs(values, all_required_field_names)
 
     @model_validator(mode="after")
     def validate_environment(self) -> Self:
@@ -348,7 +383,9 @@ class ChatSarvam(BaseChatModel):
         return "sarvam-chat"
 
     def _get_ls_params(
-        self, stop: list[str] | None = None, **kwargs: Any
+        self, 
+        stop: list[str] | None = None, 
+        **kwargs: Any
     ) -> LangSmithParams:
         """Get parameters for LangSmith tracing.
 
@@ -358,30 +395,19 @@ class ChatSarvam(BaseChatModel):
 
         Returns:
             LangSmithParams object with tracing information.
-        """
-        # kwargs is unused but required by base class interface
+        """ 
+        params = self._get_invocation_params(stop=stop, **kwargs)
         ls_params = LangSmithParams(
             ls_provider="sarvam",
-            ls_model_name=self.model_name,
+            ls_model_name=params.get("model", self.model_name),
             ls_model_type="chat",
-            ls_temperature=self.temperature,
-            ls_max_tokens=self.max_tokens,
-            ls_stop=stop or self.stop,
+            ls_temperature=params.get("temperature", self.temperature),
         )
-        if isinstance(self.max_tokens, int):
-            ls_params["ls_max_tokens"] = self.max_tokens
-        if stop or self.stop:
-            ls_stop: list[str] | None
-            if stop is not None:
-                ls_stop = stop
-            elif isinstance(self.stop, list):
-                ls_stop = self.stop
-            elif isinstance(self.stop, str):
-                ls_stop = [self.stop]
-            else:
-                ls_stop = None
-            if ls_stop:
-                ls_params["ls_stop"] = ls_stop
+
+        if ls_max_tokens := params.get("max_tokens", self.max_tokens):
+            ls_params["ls_max_tokens"] = ls_max_tokens
+        if ls_stop := stop or params.get("stop", None) or self.stop:
+            ls_params["ls_stop"] = ls_stop if isinstance(ls_stop, list) else [ls_stop]
         return ls_params
 
     def _default_params(self) -> dict[str, Any]:
@@ -390,8 +416,8 @@ class ChatSarvam(BaseChatModel):
         Returns:
             Dictionary of parameters to send to the Sarvam AI API.
         """
-        # Sarvam SDK does not accept a 'model' parameter currently; default model is sarvam-m.
         params: dict[str, Any] = {
+            "model": self.model_name,
             "n": self.n,
         }
         if self.temperature is not None:
@@ -588,6 +614,59 @@ class ChatSarvam(BaseChatModel):
                 )
             yield generation_chunk
 
+    def _create_usage_metadata(self, sarvam_token_usage: dict) -> UsageMetadata:
+        """
+        Create usage metadata from Sarvam token usage response.
+
+        Args:
+            sarvam_token_usage: Token usage dict from Sarvam API response.
+
+        Returns:
+            Usage metadata dict with input/output token details.
+        """
+
+        input_tokens = (
+            sarvam_token_usage.get("input_token") or
+            sarvam_token_usage.get("prompt_tokens") or 
+            0
+        )
+
+        output_tokens = (
+            sarvam_token_usage.get("output_token") or
+            sarvam_token_usage.get("completion_tokens") or 
+            0
+        )
+
+        total_tokens = (
+            sarvam_token_usage.get("total_tokens") or
+            input_tokens + output_tokens
+        )
+
+        # Support both formats for token details:
+        # Responses API uses "*_tokens_details", Chat Completions API might use
+        # "prompt_token_details"
+
+        # input_details_dict = (
+        #     sarvam_token_usage.get("input_tokens_details")
+        #     or sarvam_token_usage.get("prompt_tokens_details")
+        #     or {}
+        # )
+        # output_details_dict = (
+        #     sarvam_token_usage.get("output_tokens_details")
+        #     or sarvam_token_usage.get("completion_tokens_details")
+        #     or {}
+        # )
+
+        usage_metadata: UsageMetadata ={
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": total_tokens,
+            # "input_token_details": input_details_dict,
+            # "output_token_details": output_details_dict,
+        }
+
+        return usage_metadata
+
     def _create_chat_result(
         self, response: dict | BaseModel, params: Mapping[str, Any]
     ) -> ChatResult:
@@ -608,36 +687,43 @@ class ChatSarvam(BaseChatModel):
         for res in response.get("choices", []):
             message = _convert_dict_to_message(res["message"])  # type: ignore[index]
             if token_usage and isinstance(message, AIMessage):
-                input_tokens = token_usage.get("prompt_tokens", 0)
-                output_tokens = token_usage.get("completion_tokens", 0)
-                message.usage_metadata = {
-                    "input_tokens": input_tokens,
-                    "output_tokens": output_tokens,
-                    "total_tokens": token_usage.get(
-                        "total_tokens", input_tokens + output_tokens
-                    ),
-                }
+                message.usage_metadata = self._create_usage_metadata(token_usage)
             generation_info: dict[str, Any] = {
                 "finish_reason": res.get("finish_reason")
             }
             gen = ChatGeneration(message=message, generation_info=generation_info)
             generations.append(gen)
-        llm_output: dict[str, Any] = {}
-        if token_usage:
-            llm_output["token_usage"] = token_usage
-        if model_name := response.get("model"):
-            llm_output["model_name"] = model_name
-        if system_fingerprint := response.get("system_fingerprint"):
-            llm_output["system_fingerprint"] = system_fingerprint
+
+        llm_output = {
+            "token_usage": token_usage,
+            "model_name" : self.model_name,
+            "system_fingerprint": response.get("system_fingerprint")
+        }
+        reasoning_effort = params.get("reasoning_effort") or self.reasoning_effort
+        if reasoning_effort:
+            llm_output['reasoning_effort'] = reasoning_effort
         return ChatResult(generations=generations, llm_output=llm_output or None)
 
 
 def _convert_message_to_dict(message: BaseMessage) -> dict[str, Any]:
+    """Convert a LangChain message to a dictionary.
+
+    Args:
+        message: The LangChain message.
+
+    Returns:
+        The dictionary.
+
+    """
+    message_dict: dict[str, Any]
     if isinstance(message, ChatMessage):
         return {"role": message.role, "content": message.content}
-    if isinstance(message, HumanMessage):
-        return {"role": "user", "content": message.content}
-    if isinstance(message, AIMessage):
+    elif isinstance(message, HumanMessage):
+        return {
+            "role": "user", 
+            "content": message.content
+        }
+    elif isinstance(message, AIMessage):
         content = message.content
         if isinstance(content, list):
             text_blocks = [
@@ -647,19 +733,27 @@ def _convert_message_to_dict(message: BaseMessage) -> dict[str, Any]:
             ]
             content = text_blocks if text_blocks else ""
         return {"role": "assistant", "content": content}
-    if isinstance(message, SystemMessage):
+    elif isinstance(message, SystemMessage):
         return {"role": "system", "content": message.content}
-    if isinstance(message, FunctionMessage):
-        return {"role": "function", "content": message.content, "name": message.name}
-    if isinstance(message, ToolMessage):
+    elif isinstance(message, FunctionMessage):
+        return {
+            "role": "function",
+            "content": message.content, 
+            "name": message.name
+        }
+    elif isinstance(message, ToolMessage):
         return {
             "role": "tool",
             "content": message.content,
             "tool_call_id": message.tool_call_id,
         }
-    msg = f"Got unknown type {message}"
-    raise TypeError(msg)
-
+    else:
+        msg = f"Got unknown type {message}"
+        raise TypeError(msg)
+    
+    if "name" in message.additional_kwargs:
+        message_dict["name"] = message.additional_kwargs["name"]
+    return message_dict
 
 def _convert_chunk_to_message_chunk(
     chunk: Mapping[str, Any], default_class: type[BaseMessageChunk]
@@ -685,12 +779,26 @@ def _convert_chunk_to_message_chunk(
 
 
 def _convert_dict_to_message(_dict: Mapping[str, Any]) -> BaseMessage:
+    """Convert a dictionary to a LangChain message.
+
+    Args:
+        _dict: The dictionary.
+
+    Returns:
+        The LangChain message.
+
+    """
+    id_ = _dict.get("id")
     role = _dict.get("role")
     if role == "user":
         return HumanMessage(content=_dict.get("content", ""))
     if role == "assistant":
+        content = _dict.get("content","") or ""
+        additional_kwargs: dict = {}
+
         return AIMessage(
-            content=_dict.get("content", "") or "",
+            content=content,
+            id = id_,
             response_metadata={"model_provider": "sarvam"},
         )
     if role == "system":

@@ -32,7 +32,7 @@ packages = ["langchain_sarvam"]
 
 [dependency-groups]
 test = [
-    "pytest>=8.0.0",
+    "pytest>=9.0.2",
     "pytest-socket>=0.7.0",
     "pytest-asyncio>=0.23.0",
     "pytest-mock>=3.12.0",
