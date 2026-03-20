@@ -44,35 +44,6 @@ resp = llm.invoke([("system", "You are helpful"), ("human", "Hello!")])
 print(resp.content)
 ```
 
-### Language-Specific Usage
-
-```python
-from langchain_sarvam import ChatSarvam
-
-llm = ChatSarvam(
-    model="sarvam-m",
-    temperature=0.7,
-    sarvam_api_key=os.getenv("SARVAM_API_KEY")
-)
-
-response = llm.invoke([
-    ("system", "talk in Hindi"),
-    ("human", "what is color of sky?"),
-])
-print(response.content)  # Output: आसमान का रंग नीला होता है...
-```
-
-### Advanced Content Generation
-
-```python
-from langchain_sarvam import ChatSarvam
-
-llm = ChatSarvam(model="sarvam-m")
-
-# Generate blog post outline
-response = llm.invoke("create the outline for the blog post outline for blog topic - AI engineering.")
-print(response.content)
-```
 
 ### Batch Processing
 
