@@ -6,7 +6,10 @@ import json
 import warnings
 from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
 from operator import itemgetter
-from typing import Any, Literal, cast
+from typing import Any, Literal, Union, cast
+
+from langchain_core.language_models import LanguageModelInput
+from langchain_core.runnables import Runnable, RunnablePassthrough, RunnableMap
 
 from langchain_core.callbacks import (
     AsyncCallbackManagerForLLMRun,
@@ -18,6 +21,23 @@ from langchain_core.language_models.chat_models import (
     LangSmithParams,
     agenerate_from_stream,
     generate_from_stream,
+)
+from langchain_core.utils.pydantic import is_basemodel_subclass
+from langchain_core.output_parsers.base import OutputParserLike
+from langchain_core.output_parsers.openai_tools import (
+    JsonOutputKeyToolsParser,
+    PydanticToolsParser,
+)
+from langchain_core.output_parsers import JsonOutputParser, PydanticOutputParser
+from langchain_core.tools import BaseTool
+from langchain_core.messages.ai import (
+    InputTokenDetails,
+    OutputTokenDetails,
+    UsageMetadata,
+)
+from langchain_core.utils.function_calling import (
+    convert_to_json_schema,
+    convert_to_openai_tool,
 )
 from langchain_core.utils.utils import _build_model_kwargs
 from langchain_core.messages import (
@@ -40,6 +60,36 @@ from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResu
 from langchain_core.utils import get_pydantic_field_names, secret_from_env
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 from typing_extensions import Self
+
+
+_STRICT_STRUCTURED_OUTPUT_MODELS = frozenset(
+    {
+        "sarvam/sarvam-30b",
+        "sarvam/sarvam-120b",
+    }
+)
+
+# Parameters accepted by the Sarvam SDK's completions() method.
+# Any kwargs not in this set are filtered out before calling the SDK.
+_SARVAM_SDK_PARAMS = frozenset(
+    {
+        "model",
+        "temperature",
+        "top_p",
+        "reasoning_effort",
+        "max_tokens",
+        "stream",
+        "stop",
+        "n",
+        "seed",
+        "frequency_penalty",
+        "presence_penalty",
+        "wiki_grounding",
+        "tools",
+        "tool_choice",
+        "request_options",
+    }
+)
 
 
 class ChatSarvam(BaseChatModel):
@@ -485,7 +535,9 @@ class ChatSarvam(BaseChatModel):
             return generate_from_stream(stream_iter)
         message_dicts, params = self._create_message_dicts(messages, stop)
         params = {**params, **kwargs}
-        resp = self.client.completions(messages=message_dicts, **params)
+        # Filter out kwargs not supported by the Sarvam SDK
+        sdk_params = {k: v for k, v in params.items() if k in _SARVAM_SDK_PARAMS}
+        resp = self.client.completions(messages=message_dicts, **sdk_params)
         return self._create_chat_result(resp, params)
 
     async def _agenerate(
@@ -513,7 +565,9 @@ class ChatSarvam(BaseChatModel):
             return await agenerate_from_stream(stream_iter)
         message_dicts, params = self._create_message_dicts(messages, stop)
         params = {**params, **kwargs}
-        resp = await self.async_client.completions(messages=message_dicts, **params)
+        # Filter out kwargs not supported by the Sarvam SDK
+        sdk_params = {k: v for k, v in params.items() if k in _SARVAM_SDK_PARAMS}
+        resp = await self.async_client.completions(messages=message_dicts, **sdk_params)
         return self._create_chat_result(resp, params)
 
     def _stream(
@@ -705,6 +759,170 @@ class ChatSarvam(BaseChatModel):
         return ChatResult(generations=generations, llm_output=llm_output or None)
 
 
+    def bind_tools(
+        self,
+        tools: Sequence[dict[str, Any] | type[BaseModel] | Callable | BaseTool],
+        *,
+        tool_choice: dict | str | bool | None = None,
+        **kwargs: Any,
+    ) -> Runnable[LanguageModelInput, AIMessage]:
+        """Bind tool-like objects to this chat model.
+
+        Args:
+            tools: A list of tool definitions to bind to this chat model.
+                Supports Sarvam format tool schemas and any tool definition handled
+                by `convert_to_openai_tool`.
+            tool_choice: Which tool to require the model to call.
+                Must be the name of the single provided function,
+                'auto' to automatically determine which function to call.
+            **kwargs: Any additional parameters to pass to the Runnable constructor.
+        """
+        _ = kwargs.pop("strict", None)
+
+        formatted_tools = [convert_to_openai_tool(tool) for tool in tools]
+        if tool_choice is not None and tool_choice:
+            if tool_choice == "any":
+                tool_choice = "required"
+            if isinstance(tool_choice, str) and (
+                tool_choice not in ("auto", "none", "required")
+            ):
+                tool_choice = {"type": "function", "function": {"name": tool_choice}}
+            if isinstance(tool_choice, bool):
+                if len(tools) > 1:
+                    msg = (
+                        "tool_choice can only be True when there is one tool. Received "
+                        f"{len(tools)} tools."
+                    )
+                    raise ValueError(msg)
+                tool_name = formatted_tools[0]["function"]["name"]
+                tool_choice = {
+                    "type": "function",
+                    "function": {"name": tool_name},
+                }
+            kwargs["tool_choice"] = tool_choice
+        return super().bind(tools=formatted_tools, **kwargs)
+
+    def with_structured_output(
+        self,
+        schema: dict | type[BaseModel] | None = None,
+        *,
+        method: Literal[
+            "function_calling", "json_mode", "json_schema"
+        ] = "function_calling",
+        include_raw: bool = False,
+        strict: bool | None = None,
+        **kwargs: Any,
+    ) -> Runnable[LanguageModelInput, dict | BaseModel]:
+        """Model wrapper that returns outputs formatted to match the given schema.
+
+        Args:
+            schema: The output schema. Can be a Pydantic class, TypedDict, JSON Schema
+                dict, or OpenAI tool schema.
+            method: The method to use for structured output.
+                - "function_calling": Use function calling (default, recommended).
+                - "json_mode": Use JSON mode.
+                - "json_schema": Falls back to function_calling internally since the
+                  Sarvam SDK does not support response_format natively.
+            include_raw: If True, return both raw and parsed outputs.
+            strict: Only used with json_schema; ignored for unsupported models.
+            **kwargs: Additional parameters for the Runnable constructor.
+        """
+        is_pydantic_schema = _is_pydantic_class(schema)
+        if method == "function_calling":
+            if schema is None:
+                msg = (
+                    "schema must be specified when method is 'function_calling'. "
+                    "Received None."
+                )
+                raise ValueError(msg)
+            formatted_tool = convert_to_openai_tool(schema)
+            tool_name = formatted_tool["function"]["name"]
+            llm = self.bind_tools(
+                [schema],
+                tool_choice=tool_name,
+                ls_structured_output_format={
+                    "kwargs": {"method": "function_calling"},
+                    "schema": formatted_tool,
+                },
+                **kwargs,
+            )
+            if is_pydantic_schema:
+                output_parser: OutputParserLike = PydanticToolsParser(
+                    tools=[schema],
+                    first_tool_only=True,
+                )
+            else:
+                output_parser = JsonOutputKeyToolsParser(
+                    key_name=tool_name, first_tool_only=True
+                )
+        elif method == "json_schema":
+            # The Sarvam SDK does not support the response_format parameter,
+            # so json_schema cannot work natively. Fall back to function_calling
+            # which is reliably supported and produces equivalent structured output.
+            if schema is None:
+                msg = (
+                    "schema must be specified when method is 'json_schema'. "
+                    "Received None."
+                )
+                raise ValueError(msg)
+            formatted_tool = convert_to_openai_tool(schema)
+            tool_name = formatted_tool["function"]["name"]
+            llm = self.bind_tools(
+                [schema],
+                tool_choice=tool_name,
+                ls_structured_output_format={
+                    "kwargs": {"method": "json_schema"},
+                    "schema": formatted_tool,
+                },
+                **kwargs,
+            )
+            if is_pydantic_schema:
+                output_parser = PydanticToolsParser(
+                    tools=[schema],
+                    first_tool_only=True,
+                )
+            else:
+                output_parser = JsonOutputKeyToolsParser(
+                    key_name=tool_name, first_tool_only=True
+                )
+        elif method == "json_mode":
+            llm = self.bind(
+                response_format={"type": "json_object"},
+                ls_structured_output_format={
+                    "kwargs": {"method": "json_mode"},
+                    "schema": schema,
+                },
+                **kwargs,
+            )
+            output_parser = (
+                PydanticOutputParser(pydantic_object=schema)
+                if is_pydantic_schema
+                else JsonOutputParser()
+            )
+        else:
+            msg = (
+                "Unrecognized method argument. Expected one of "
+                "'function_calling', 'json_mode', or 'json_schema'. "
+                f"Received: '{method}'"
+            )
+            raise ValueError(msg)
+
+        if include_raw:
+            parser_assign = RunnablePassthrough.assign(
+                parsed=itemgetter("raw") | output_parser, parsing_error=lambda _: None
+            )
+            parser_none = RunnablePassthrough.assign(parsed=lambda _: None)
+            parser_with_fallback = parser_assign.with_fallbacks(
+                [parser_none], exception_key="parsing_error"
+            )
+            return RunnableMap(raw=llm) | parser_with_fallback
+        return llm | output_parser
+
+
+def _is_pydantic_class(obj: Any) -> bool:
+    return isinstance(obj, type) and is_basemodel_subclass(obj)
+
+
 def _convert_message_to_dict(message: BaseMessage) -> dict[str, Any]:
     """Convert a LangChain message to a dictionary.
 
@@ -793,12 +1011,49 @@ def _convert_dict_to_message(_dict: Mapping[str, Any]) -> BaseMessage:
     if role == "user":
         return HumanMessage(content=_dict.get("content", ""))
     if role == "assistant":
-        content = _dict.get("content","") or ""
+        content = _dict.get("content", "") or ""
         additional_kwargs: dict = {}
+        tool_calls_data = _dict.get("tool_calls")
+        tool_calls = []
+        if tool_calls_data:
+            additional_kwargs["tool_calls"] = tool_calls_data
+            for tc in tool_calls_data:
+                # Handle both dict and object-style tool call data
+                if isinstance(tc, dict):
+                    function_info = tc.get("function", {})
+                    tc_id = tc.get("id", "")
+                    fn_name = function_info.get("name", "")
+                    fn_args = function_info.get("arguments", "")
+                else:
+                    # Object-style (e.g. Pydantic model from SDK)
+                    function_info = getattr(tc, "function", None)
+                    tc_id = getattr(tc, "id", "") or ""
+                    fn_name = getattr(function_info, "name", "") if function_info else ""
+                    fn_args = getattr(function_info, "arguments", "") if function_info else ""
+
+                # Parse arguments from JSON string if needed
+                if isinstance(fn_args, str):
+                    try:
+                        parsed_args = json.loads(fn_args)
+                    except (json.JSONDecodeError, TypeError):
+                        parsed_args = {}
+                else:
+                    parsed_args = fn_args if isinstance(fn_args, dict) else {}
+
+                tool_calls.append(
+                    {
+                        "name": fn_name,
+                        "args": parsed_args,
+                        "id": tc_id,
+                        "type": "tool_call",
+                    }
+                )
 
         return AIMessage(
             content=content,
-            id = id_,
+            id=id_,
+            additional_kwargs=additional_kwargs,
+            tool_calls=tool_calls,
             response_metadata={"model_provider": "sarvam"},
         )
     if role == "system":
